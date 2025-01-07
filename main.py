@@ -1,26 +1,12 @@
-# Imports
-import os
-from dotenv import load_dotenv
-from sales_agent import call_agent
+from agent import invoke_graph
 
-# Loading env variables
-load_dotenv()
+# Gathering user inputs
+industry = input("What industry are you looking to sell to: ")
+conditions = input("What other conditions would you like to add to your search: ")
 
-# Setting up LLM model
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+result = invoke_graph(industry, conditions)
 
-# Gathering user inputs for the company search
-product: str = input('What do you sell: ')
-target_industry: str =input('What Industry are you looking to sell to: ')
-conditions: str = input('Are there any conditions surrounding your sales search: ')
 
-# Starting flow
-response, thread_id = call_agent({
-    'product': product,
-    'target_industry': target_industry,
-    'conditions': conditions
-})
-
-print(response)
 
 breakpoint()
+
