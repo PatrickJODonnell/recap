@@ -1,12 +1,16 @@
-from agent import invoke_graph
+from agent import invoke_agent
+import asyncio
 
-# Gathering user inputs
-industry = input("What industry are you looking to sell to: ")
-conditions = input("What other conditions would you like to add to your search: ")
+# Todo - add prefect decorator and install
+async def deploy_agent():
+    """
+    Main function. All agent calls will occur here.
+    """
+    await invoke_agent()
 
-result = invoke_graph(industry, conditions)
+# For local testing
+if __name__() == '__main__':
+    asyncio.run(deploy_agent)
 
 
-
-breakpoint()
 

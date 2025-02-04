@@ -2,87 +2,39 @@ from typing import Literal, List
 from typing_extensions import TypedDict
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START
-from agent_types import CompanyResult, EmployeeResult
 
 llm = ChatOpenAI(model = "gpt-4o", temperature = 0.0)
 
+# Defining the state dict and the router
 class State(TypedDict):
-    input_industry: str
-    input_condition: str
-    query: str
-    company_links = List[str]
-    companies = List[CompanyResult]
-    is_companies_done = bool
-    employee_links = List[str]
-    employees = List[EmployeeResult]
-    is_employees_done = bool
-    next_node: str
+    desired_subjects = List[str]
+    web_query: str
+    youtube_query: str
+    next: str
 
-def router(state) -> Literal["generate_search_query", "company_search", "company_scrape", "company_verification", "employee_scrape", "employee_verification", "__end__"]:
-    """
-    Node router used to send the graph to its next state.
-    """
-    return state['next_node'] 
+members = ["preparation_agent", "web_agent", "youtube_agent", "writing_agent", "proof_reading_agent"]
+options = members + ["FINISH"]
+class Router(TypedDict):
+    """Worker to route to next. If no workers needed, route to FINISH."""
+    next: Literal[*options] # type: ignore
 
-def generate_search_query(state) -> str:
-    """
-    Taking in user inputs and queryling the llm to create a search friendly query string.
-    Returns the next node for the conditional edges.
-    """
 
-def company_search(state) -> str:
-    """
-    Taking in the search query and performing a web search. Here we will begin to populate the company_links list
-    Returns the next node for the conditional edges.
-    """
+# Defining system prompt
+system_prompt = (
+    "You are a supervisor tasked with managing a conversation between the"
+    f" following workers: {members}. Given the following user request,"
+    " respond with the worker to act next. Each worker will perform a"
+    " task and respond with their results and status. The workers must"
+    " act in the order preparation_agent, web_agent, youtube_agent,"
+    " writing_agent, proof_reading_agent. Each agent must finish their task"
+    " before the next agent begins working. When finished, respond with FINISH."
+)
 
-def company_scrape(state) -> str:
-    """
-    Taking in the list of company links and will perform web scrapes to fill in the companies list.
-    Returns the next node for the conditional edges. 
-    """
 
-def company_verification(state) -> str:
-    """
-    Taking in the list of company objects and performing verification tests prior to searching employees.
-    Returns the next node for conditional edges.
-    """
 
-def employee_scrape(state) -> str:
-    """
-    Taking in the companies list and pulling information for all active employees found. We will populate the 
-    employees list here.
-    Returns the next node for conditional edges.
-    """
 
-def employee_verification(state) -> str:
-    """
-    Taking in the list of employee objects and performs verification tests prior to returning to the user.
-    Returns the next node for conditional edges.
-    """
 
-# Build graph
-builder = StateGraph(State)
-builder.add_node("generate_search_query", generate_search_query)
-builder.add_node("company_search", company_search)
-builder.add_node("company_scrape", company_scrape)
-builder.add_node("company_verification", company_verification)
-builder.add_node("employee_scrape", employee_scrape)
-builder.add_node("employee_verification", employee_verification)
-
-# Logic
-builder.add_edge(START, "generate_search_query")
-builder.add_conditional_edges("generate_search_query", router)
-builder.add_conditional_edges("company_search", router)
-builder.add_conditional_edges("company_scrape", router)
-builder.add_conditional_edges("company_verification", router)
-builder.add_conditional_edges("employee_scrape", router)
-builder.add_conditional_edges("employee_verification", router)
-
-# Add
-graph = builder.compile()
-
-def invoke_graph(industry: str, conditions: str):
+async def invoke_agent(industry: str, conditions: str):
     result = graph.invoke({
         "input_industry": industry,
         "input_condition": conditions

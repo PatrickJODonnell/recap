@@ -5,3 +5,4 @@ langchain
 python-dotenv
 tavily-python
 langchain-community
+flask
