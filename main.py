@@ -9,8 +9,8 @@ async def deploy_agent():
     await invoke_agent()
 
 # For local testing
-if __name__() == '__main__':
-    asyncio.run(deploy_agent)
+if __name__ == '__main__':
+    asyncio.run(deploy_agent())
 
 
 
