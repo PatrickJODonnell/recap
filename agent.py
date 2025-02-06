@@ -6,63 +6,36 @@ from langgraph.types import Command
 from temp_obj import topics
 import random
 from langgraph.prebuilt import create_react_agent
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, HumanMessage
+from pydantic import BaseModel
+from langchain_core.messages import BaseMessage
+import re
+import ast
 
 llm = ChatOpenAI(model = "gpt-4o", temperature = 1.0)
 
+# preparation_agent, "web_agent", "youtube_agent", "writing_agent", "proof_reading_agent"
 
 # Defining the state dict and the router
-class State(TypedDict):
-    desired_subjects = List[str]
-    web_queries: List[str]
-    youtube_queries: List[str]
-    next: str
-
-members = ["preparation_agent"] # , "web_agent", "youtube_agent", "writing_agent", "proof_reading_agent"
-options = members + ["FINISH"]
-class Router(TypedDict):
-    """Worker to route to next. If no workers needed, route to FINISH."""
-    next: Literal[*options] # type: ignore
-
-
-# Defining system prompt
-system_prompt = (
-    "You are a supervisor tasked with managing a conversation between the"
-    f" following workers: {members}. Given the following user request,"
-    " respond with the worker to act next. Each worker will perform a"
-    " task and respond with their results and status. The workers must"
-    " act in the order preparation_agent, web_agent, youtube_agent,"
-    " writing_agent, proof_reading_agent. Each agent must finish their task"
-    " before the next agent begins working. When finished, respond with FINISH."
-    " For now, we only have the preparation_agent so just perform that step!"
-)
-
+class State(BaseModel):
+    messages: List[BaseMessage] = []
+    desired_subjects: List[str] = None
+    web_queries: List[str] = None
+    youtube_queries: List[str] = None
+    next: str = None
 
 # Defining tools for the agents
-
-
-
-# Defining supervisor node
-def supervisor_node(state: State) -> Command[Literal[*members, "__end__"]]: # type: ignore
-    """
-    Supervisor node responsible for calling upon other nodes.
-    """
-    messages = [{"role": "system", "content": system_prompt},] + [
-        {"role": "user", "content": "Please find and summarize an internet article and a Youtube video for each one of the following topics and return it in a newletter format."}
-        ]
-    response = llm.with_structured_output(Router).invoke(messages)
-    goto = response["next"]
-    if goto == "FINISH":
-        goto = END
-    return Command(goto=goto, update={"next": goto})
-
 
 # Defining the preparation agent
 preparation_agent = create_react_agent(
     model=llm, tools=[], state_modifier=SystemMessage(content="""
-    Your function is to suggest new topics of interest. To do this, take in a list of topics and determine if they are appropriate.
-    If any are not appropriate, replace that topic. Your final list should consist of 4 topics. If the length of your topic list is 
-    less than 4, you should add more topics that the user may be interested in until the length of the topic list is 4.
+    Your function is to suggest new topics of interest until you have 4 topics. Given a list of desired_subjects. 
+    you should determine how many additional topics that you need to suggest. Once you determine this number,
+    suggest topics that are similar to the ones initially provided. Also, if any of the topics would be deemed illegal,
+    replace them with another suggested topic.
+
+    For example, if ['NBA', 'Murder'] is provided, you could suggest topics like 'NFL', 'NHL', 'WNBA' and respond with
+    ['NBA', 'NFL', 'NHL', 'WNBA']                                                                                                    
 
     Your response should start with: TOPICS: [topic1, topic2, topic3, topic4].
     """)
@@ -70,29 +43,65 @@ preparation_agent = create_react_agent(
 
 
 # Defining preparation node
-def preparation_node(state: State) -> Command[Literal["supervisor"]]:
+def preparation_node(state: State):
     """
-    Preparation node responsible for gathering topics, suggesting a topic, determining if topics are appropriate, and return search queries
+    Preparation node responsible for gathering topics, suggesting a topic, determining if topics are appropriate, and return search queries.
     """
     # Pulling topics from database (for now just pulling from a dict)
     topic_length = len(topics)
-    desired_subjects = []
+    desired_subjects: List[str] = []
     if topic_length >= 3:
         desired_subjects = random.sample(topics, 3)
     else:
-        state["desired_subjects"] = topics
+        desired_subjects = topics
 
-    # Updating state
+    # Updating local state
+    updated_state = state.model_copy(update={"desired_subjects": desired_subjects})
+    updated_state.messages.append(HumanMessage(content=f"desired_subjects: {desired_subjects}"))
 
-# TODO - pick up here
     # Generating suggested topics and replacing innapropriate topics
-    result = preparation_agent.invoke(state)
-    print(result)
+    result = preparation_agent.invoke(updated_state)
+    new_message = result['messages'][-1].content
+
+    # Inserting new topics to local state
+    match = re.search(r"TOPICS:\s*(\[[^\]]+\])", new_message)
+    if match:
+        topics_str = match.group(1)  # Extract the list as a string
+        updated_state.desired_subjects = ast.literal_eval(topics_str)  # Convert string to a Python list
+
+    # Generating search queries
+    for topic in updated_state.desired_subjects:
+        web_query = f'Find a recent article about {topic} related news.'
+        youtube_query = f'Find a recent video about {topic} related news.'
+        updated_state.web_queries.append(web_query)
+        updated_state.youtube_queries.append(youtube_query)
+
+    # Updating message and next in local state
+    updated_state.messages.append(SystemMessage(content=f"Suggested topics: {result}"))
+    if (len(updated_state.desired_subjects) == 4 and len(updated_state.web_queries) == 4 and len(updated_state.youtube_queries) == 4):
+        updated_state.next = "web_node"
+    else:
+        updated_state.next = "__end__"
+
+    # Returning updated state and next node
+    return updated_state
+
+
+builder = StateGraph(State)
+builder.add_edge(START, "preparation_node")
+builder.add_node("preparation_node", preparation_node)
+# TODO - pick up here. Begin by adding conditional nodes from preparation node to web and youtube node or end
+builder.add_edge("preparation_node", END)
+graph = builder.compile()
+    
 
 
 
 async def invoke_agent():
-    result = preparation_node(state=State)
+
+    initial_state = State()
+
+    result = graph.invoke(initial_state)
 
     breakpoint()
 

@@ -3,5 +3,7 @@ topics = [
     "Philadelphia 76ers",
     "Jared McCain",
     "Philadelphia Eagles",
-    "Technology"
+    "Technology",
+    "Cocain",
+    "Murder"
 ]
