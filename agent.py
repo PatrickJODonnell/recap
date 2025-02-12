@@ -12,6 +12,7 @@ from langchain_core.messages import BaseMessage
 import re
 import ast
 from langchain_community.tools.tavily_search import TavilySearchResults
+import json
 
 llm = ChatOpenAI(model = "gpt-4o", temperature = 1.0)
 search_llm = ChatOpenAI(model = "gpt-4o", temperature = 0.0)
@@ -79,8 +80,8 @@ def preparation_node(state: State):
 
     # Generating search queries
     for topic in updated_state.desired_subjects:
-        web_query = f'Find a recent article about {topic} related news.'
-        youtube_query = f'Find a recent video about {topic} related news.'
+        web_query = f'Find a recent article about {topic} related news within the last 3 days.'
+        youtube_query = f'Find a recent video about {topic} related news within the last 3 days.'
         updated_state.web_queries.append(web_query)
         updated_state.youtube_queries.append(youtube_query)
 
@@ -94,52 +95,121 @@ def preparation_node(state: State):
     # Returning updated state and next node
     return updated_state
 
+# Function to validate an article link
+def validate_link(link: string) -> bool:
+    """Checks the link to see if it fits any generic page criteria"""
+     # Patterns indicating an article (dates, detailed slugs)
+    article_patterns = [
+        r'/\d{4}/\d{1,2}/\d{1,2}/',  # Matches YYYY/MM/DD format in URL
+        r'/\d{4}/\d{1,2}/',          # Matches YYYY/MM format in URL
+        r'/\d{4}/'                   # Sometimes just a year in the path is enough
+    ]
 
-# Defining the web agent
+    # Patterns indicating a general page (news indexes, team pages, etc.)
+    general_page_patterns = [
+        r'/team/', r'/topics/', r'/news/', r'/latest/', r'/category/', r'/section/',
+        r'/overview/', r'/index.html', r'/home/', r'/archives/', r'/tag/', r'/stories/',
+        r'/updates/', r'/all-news/', r'/sports/', r'/league/', r'/standings/', r'/schedule/',
+        r'/all/'
+    ]
+
+    # Check if it matches an article pattern
+    is_article = any(re.search(pattern, link) for pattern in article_patterns)
+    
+    # Check if it matches a general page pattern
+    is_general_page = any(re.search(pattern, link) for pattern in general_page_patterns)
+
+    # Final classification
+    if is_article and not is_general_page:
+        return True
+    elif is_article is is_general_page:
+        return True
+
+
+# Function to parse and validate the agent's response
+def parse_web_agent_response(response_text):
+    """Parses the JSON response from the web agent and ensures it matches required format."""
+    try:
+        response_text = response_text.strip("```json").strip("```").strip()
+        response_json = json.loads(response_text)
+        if "link" in response_json and "summary" in response_json:
+            return response_json
+        else:
+            raise ValueError("Response does not contain the required fields.")
+    except json.JSONDecodeError:
+        raise ValueError("Agent response is not valid JSON.")
+
+
+# Web search tool using Tavily
 web_search_tool = TavilySearchResults(
-            max_results=5,
-            include_answer=True,
-            include_raw_content=True,
-            search_depth="advanced",
-            # include_domains = []
-            exclude_domains = ['youtube.com']
-        )
+    max_results=3,
+    include_answer=True,
+    include_raw_content=True,
+    search_depth="advanced",
+    exclude_domains=["youtube.com"],
+)
 
+# Web agent
 web_agent = create_react_agent(
-    model=search_llm, tools=[web_search_tool], state_modifier=SystemMessage(content="""
-    Your function is to perform web searches based on queries given to you. Given a list of 
-    web queries you should use these to perfom searches with your tool. You should gather both a list of                                                                                                     
-    links and summaries of each web article that you find. Remember, only find 1 article per query. 
-                                                      
-    For example, if 'Find a recent article about Philadelphia 76ers related news' is the web query you are
-    given, you can find a article such as this https://www.si.com/nba/76ers/news/reggie-jackson-expected-to-find-new-team-after-76ers-wizards-trade-01jke4qnbz5a
-    and provide a summary on the article that gives the main point. Make sure to look into an actual article,
-    not just a summary page of articles. A summary page of articles looks like this: https://www.reuters.com/technology/
-    where the page has links to many other articles.                                                                          
-    Finally, ensure that the news articles that you return have been recently posted in the last 7 days. If the article 
-    you have chosen is older than 7 days old find a different article.                                                                                                                                                                                                                                                                                                                                                                                       
+    model=search_llm,
+    tools=[web_search_tool],
+    state_modifier=SystemMessage(content="""
+    Your function is to perform web searches based on a query given to you. Given a 
+    web query, you must perform searches with your tool and retrieve exactly **one** relevant, 
+    **recent** article per query. 
 
-    Your response should follow this strict format: LINKS: [link_for_topic_1, link_for_topic_2, link_for_topic_3, link_for_topic_4] AND
-    SUMMARIES: [summary_for_topic_1, summary_for_topic_1, summary_for_topic_1, summary_for_topic_1]. Each element in the provided 
-    arrays should be replaced with the actual links and summaries that you generate.                                                                        
+    **Important:** Only return a **single, valid article per query** (not multiple articles or summary pages).
+
+    **Rules to Follow Strictly:**
+    - Only return **1 article per query**.
+    - The article **must be from the last 7 days**.
+    - **Do NOT return summary pages** like https://www.reuters.com/technology/ or https://www.nytimes.com/section/science/.
+    - Ensure the article is **directly accessible** (not a paywalled summary).
+    
+    **Response Format (Must Be Valid JSON Only)**:
+    ```json
+    {
+        "link": "link_for_topic",
+        "summary": "summary_for_topic"
+    }
+    ```
+    
+    - **If a query does not return a valid article**, retry the search with adjusted keywords.
+    - **Do NOT return empty lists.**
+    - **Your response will be rejected if it does not have exactly 4 valid articles and summaries.**
     """)
 )
 
-# Defining web node
+# Web node with enforced 4 valid articles
 def web_node(state: State):
     """
-    Web search node responsible for gathering links and generating summaries based on search queries. 
+    Web search node responsible for gathering exactly 4 links and summaries based on search queries.
     """
-    # Pulling state down locally and altering its messages for the current agent
+    # Pulling state locally
     local_state = state.model_copy()
-    local_state.messages = [HumanMessage(content=f"web queries: {local_state.web_queries}")]
 
-    # Generating links and summaries
-    result = web_agent.invoke(local_state)
-    new_message = result['messages'][-1].content
-    print(new_message)
-    print(local_state.desired_subjects)
+    # Looping through the topics and performing web search query 
+    for i in range(len(local_state.web_queries)):
+        valid_link: bool = False
+        while not valid_link:
+            local_state.messages = [HumanMessage(content=f"web query: {local_state.web_queries[i]}")]
+
+            # Querying agent
+            result = web_agent.invoke(local_state)
+            new_message = result['messages'][-1].content
+
+            # Parsing response
+            parsed_output = parse_web_agent_response(new_message)
+
+            # Validating link
+            valid_link = 
+
+        
+        breakpoint()
+
+    # TODO - continue with writing logic to replace general news links
     breakpoint()
+
 
 # Defining the youtube agent
 
