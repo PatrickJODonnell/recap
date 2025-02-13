@@ -14,9 +14,17 @@ import requests
 from dotenv import load_dotenv
 from langchain.tools import Tool
 from langchain.document_loaders import WebBaseLoader
+from datetime import datetime, timedelta
+import openai
+import numpy as np
 
+
+# Loading env variables
 load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
+
+# Loading llms for agent
 llm = ChatOpenAI(model = "gpt-4o", temperature = 1.0)
 search_llm = ChatOpenAI(model = "gpt-4o", temperature = 0.0)
 
@@ -99,16 +107,6 @@ def preparation_node(state: State):
     return updated_state
 
 
-
-# # Define LangChain tool
-# web_scraper_tool = Tool(
-#     name="WebScraper",
-#     func=scrape_with_webbase,
-#     description="Scrapes content from a given URL and extracts text."
-# )
-
-
-
 # Web agent
 web_agent = create_react_agent(
     model=search_llm,
@@ -141,8 +139,21 @@ web_agent = create_react_agent(
 )
 
 
+def get_openai_embedding(text: str):
+    """Generates an embedding using OpenAI's `text-embedding-ada-002` model."""
+    response = openai.embeddings.create(
+        input=text,
+        model="text-embedding-ada-002"
+    )
+    return np.array(response.data[0].embedding)
+
+def cosine_similarity(vec1, vec2):
+    """Computes cosine similarity between two vectors."""
+    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+
+
 # Web search function used to pull top news links
-def web_search(query: str, api_key, count=5, country="us", lang="en") -> str:
+def web_search(query: str, api_key, count=5, country="us", lang="en") -> List[dict]:
     """Takes in a query and returns a url of a new article"""
     url = "https://api.search.brave.com/res/v1/news/search"
     headers = {
@@ -160,23 +171,42 @@ def web_search(query: str, api_key, count=5, country="us", lang="en") -> str:
 
     response = requests.get(url, headers=headers, params=params)
 
-    # TODO - gather a list of ones that fit the check criteria and then return a random one 
-    # ALSO CHECK THAT THE ARTICLE WAS POSTED IN THE LAST WEEK
-
-    # TODO - ALSO NEED TO RETHINK SOME OF THE CHECKS BECAUSE SOME TOPICS LIKE TECHNOLOGT MAY 
-    # NOT BE IN THE TITLE 
-
-
     if response.status_code == 200:
         result = response.json()
+        relevant_stories: List[dict] = []
         for story in result['results']:
+            # Gathering story values
             selected_story = story['url']
             selected_title = story['title']
             selected_description = story['description']
+            selected_date = datetime.strptime(story['page_age'], "%Y-%m-%dT%H:%M:%S")
+            one_week_ago = datetime.now() - timedelta(days=7)
             stripped_query = query.replace(" news", "")
-            if stripped_query in selected_title or stripped_query in selected_description:
-                return selected_story
-        return None
+
+            # Generating embeddings
+            query_embedding = get_openai_embedding(stripped_query)
+            title_embedding = get_openai_embedding(selected_title)
+            desc_embedding = get_openai_embedding(selected_description)
+            title_similarity = cosine_similarity(query_embedding, title_embedding)
+            desc_similarity = cosine_similarity(query_embedding, desc_embedding)
+
+            # Checking relevency
+            if (stripped_query in selected_title or stripped_query in selected_description) and (selected_date > one_week_ago):
+                relevant_stories.append([selected_story, selected_description])
+                relevant_stories.append({
+                    "url": selected_story,
+                    "desc": selected_description
+                })
+            elif title_similarity > 0.7 or desc_similarity > 0.7: 
+                relevant_stories.append([selected_story, selected_description])
+                relevant_stories.append({
+                    "url": selected_story,
+                    "desc": selected_description
+                })
+        if len(relevant_stories) > 0:
+            return relevant_stories
+        else:
+            return None
     else:
         print(f"Error: {response.status_code} - {response.text}")
         return None
@@ -208,23 +238,33 @@ def web_node(state: State):
         valid_result: bool = False
         while not valid_result:
             # Querying news search
-            article_url = web_search(local_state.web_queries[i], api_key=os.getenv("BRAVE_API_KEY"))
+            chosen_article: dict = None
+            article_urls = web_search(local_state.web_queries[i], api_key=os.getenv("BRAVE_API_KEY"))
 
-            # TODO - handle if article url is none -> Probaably just recall it but up the results to 10
-            # if it doesnt work after that then scrap it
+            # Checking result of article_url and retrying if failed
+            if article_urls is None:
+                article_urls = web_search(local_state.web_queries[i], api_key=os.getenv("BRAVE_API_KEY"), count=10)
+                if article_urls is None:
+                    break
+
+            # Checking result of article_url and choosing a random article
+            else:
+                chosen_article = random.choice(article_urls)
 
             # Scraping page to gather web content
-            article_content = scrape_with_webbase(article_url)
+            article_content = scrape_with_webbase(chosen_article['url'])
 
+            if article_content and chosen_article:
+                # Querying web agent to generate summary of the article 
+                # TODO
+            else:
+                article_urls = web_search(local_state.web_queries[i], api_key=os.getenv("BRAVE_API_KEY"), count=10)
+                if article_urls is None:
+                    break
 
-            # ...
-
+            
             breakpoint()
 
-        
-        breakpoint()
-
-    # TODO - continue with writing logic to replace general news links
     breakpoint()
 
 
