@@ -6,3 +6,6 @@ python-dotenv
 tavily-python
 langchain-community
 flask
+beautifulsoup4
+lxml
+

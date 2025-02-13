@@ -1,8 +1,6 @@
-from typing import Literal, List
-from typing_extensions import TypedDict
+from typing import List
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import Command
 from temp_obj import topics
 import random
 from langgraph.prebuilt import create_react_agent
@@ -11,8 +9,13 @@ from pydantic import BaseModel
 from langchain_core.messages import BaseMessage
 import re
 import ast
-from langchain_community.tools.tavily_search import TavilySearchResults
-import json
+import os
+import requests
+from dotenv import load_dotenv
+from langchain.tools import Tool
+from langchain.document_loaders import WebBaseLoader
+
+load_dotenv()
 
 llm = ChatOpenAI(model = "gpt-4o", temperature = 1.0)
 search_llm = ChatOpenAI(model = "gpt-4o", temperature = 0.0)
@@ -80,7 +83,7 @@ def preparation_node(state: State):
 
     # Generating search queries
     for topic in updated_state.desired_subjects:
-        web_query = f'Find a recent article about {topic} related news within the last 3 days.'
+        web_query = f'{topic} news'
         youtube_query = f'Find a recent video about {topic} related news within the last 3 days.'
         updated_state.web_queries.append(web_query)
         updated_state.youtube_queries.append(youtube_query)
@@ -95,64 +98,21 @@ def preparation_node(state: State):
     # Returning updated state and next node
     return updated_state
 
-# Function to validate an article link
-def validate_link(link: string) -> bool:
-    """Checks the link to see if it fits any generic page criteria"""
-     # Patterns indicating an article (dates, detailed slugs)
-    article_patterns = [
-        r'/\d{4}/\d{1,2}/\d{1,2}/',  # Matches YYYY/MM/DD format in URL
-        r'/\d{4}/\d{1,2}/',          # Matches YYYY/MM format in URL
-        r'/\d{4}/'                   # Sometimes just a year in the path is enough
-    ]
-
-    # Patterns indicating a general page (news indexes, team pages, etc.)
-    general_page_patterns = [
-        r'/team/', r'/topics/', r'/news/', r'/latest/', r'/category/', r'/section/',
-        r'/overview/', r'/index.html', r'/home/', r'/archives/', r'/tag/', r'/stories/',
-        r'/updates/', r'/all-news/', r'/sports/', r'/league/', r'/standings/', r'/schedule/',
-        r'/all/'
-    ]
-
-    # Check if it matches an article pattern
-    is_article = any(re.search(pattern, link) for pattern in article_patterns)
-    
-    # Check if it matches a general page pattern
-    is_general_page = any(re.search(pattern, link) for pattern in general_page_patterns)
-
-    # Final classification
-    if is_article and not is_general_page:
-        return True
-    elif is_article is is_general_page:
-        return True
 
 
-# Function to parse and validate the agent's response
-def parse_web_agent_response(response_text):
-    """Parses the JSON response from the web agent and ensures it matches required format."""
-    try:
-        response_text = response_text.strip("```json").strip("```").strip()
-        response_json = json.loads(response_text)
-        if "link" in response_json and "summary" in response_json:
-            return response_json
-        else:
-            raise ValueError("Response does not contain the required fields.")
-    except json.JSONDecodeError:
-        raise ValueError("Agent response is not valid JSON.")
+# # Define LangChain tool
+# web_scraper_tool = Tool(
+#     name="WebScraper",
+#     func=scrape_with_webbase,
+#     description="Scrapes content from a given URL and extracts text."
+# )
 
 
-# Web search tool using Tavily
-web_search_tool = TavilySearchResults(
-    max_results=3,
-    include_answer=True,
-    include_raw_content=True,
-    search_depth="advanced",
-    exclude_domains=["youtube.com"],
-)
 
 # Web agent
 web_agent = create_react_agent(
     model=search_llm,
-    tools=[web_search_tool],
+    tools=[],
     state_modifier=SystemMessage(content="""
     Your function is to perform web searches based on a query given to you. Given a 
     web query, you must perform searches with your tool and retrieve exactly **one** relevant, 
@@ -180,6 +140,61 @@ web_agent = create_react_agent(
     """)
 )
 
+
+# Web search function used to pull top news links
+def web_search(query: str, api_key, count=5, country="us", lang="en") -> str:
+    """Takes in a query and returns a url of a new article"""
+    url = "https://api.search.brave.com/res/v1/news/search"
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": api_key
+    }
+    params = {
+        "q": query,
+        "count": count,
+        "country": country,
+        "search_lang": lang,
+        "spellcheck": 1
+    }
+
+    response = requests.get(url, headers=headers, params=params)
+
+    # TODO - gather a list of ones that fit the check criteria and then return a random one 
+    # ALSO CHECK THAT THE ARTICLE WAS POSTED IN THE LAST WEEK
+
+    # TODO - ALSO NEED TO RETHINK SOME OF THE CHECKS BECAUSE SOME TOPICS LIKE TECHNOLOGT MAY 
+    # NOT BE IN THE TITLE 
+
+
+    if response.status_code == 200:
+        result = response.json()
+        for story in result['results']:
+            selected_story = story['url']
+            selected_title = story['title']
+            selected_description = story['description']
+            stripped_query = query.replace(" news", "")
+            if stripped_query in selected_title or stripped_query in selected_description:
+                return selected_story
+        return None
+    else:
+        print(f"Error: {response.status_code} - {response.text}")
+        return None
+
+
+# Web scraping function used to gather content from given url
+def scrape_with_webbase(url: str) -> str:
+    """
+    Used to scrape content from a URL. Given a url it returns a string representation of the page content.
+    """
+    try:
+        loader = WebBaseLoader(url)
+        docs = loader.load()
+        return docs[0].page_content if docs else "No readable content found."
+    except Exception as e:
+        return f"Failed to fetch the webpage: {e}"
+    
+
 # Web node with enforced 4 valid articles
 def web_node(state: State):
     """
@@ -190,19 +205,21 @@ def web_node(state: State):
 
     # Looping through the topics and performing web search query 
     for i in range(len(local_state.web_queries)):
-        valid_link: bool = False
-        while not valid_link:
-            local_state.messages = [HumanMessage(content=f"web query: {local_state.web_queries[i]}")]
+        valid_result: bool = False
+        while not valid_result:
+            # Querying news search
+            article_url = web_search(local_state.web_queries[i], api_key=os.getenv("BRAVE_API_KEY"))
 
-            # Querying agent
-            result = web_agent.invoke(local_state)
-            new_message = result['messages'][-1].content
+            # TODO - handle if article url is none -> Probaably just recall it but up the results to 10
+            # if it doesnt work after that then scrap it
 
-            # Parsing response
-            parsed_output = parse_web_agent_response(new_message)
+            # Scraping page to gather web content
+            article_content = scrape_with_webbase(article_url)
 
-            # Validating link
-            valid_link = 
+
+            # ...
+
+            breakpoint()
 
         
         breakpoint()
