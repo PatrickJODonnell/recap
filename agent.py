@@ -12,7 +12,6 @@ import ast
 import os
 import requests
 from dotenv import load_dotenv
-from langchain.tools import Tool
 from langchain.document_loaders import WebBaseLoader
 from datetime import datetime, timedelta
 import openai
@@ -79,6 +78,8 @@ def preparation_node(state: State):
     updated_state = state.model_copy(update={"desired_subjects": desired_subjects})
     updated_state.messages.append(HumanMessage(content=f"desired_subjects: {desired_subjects}"))
 
+    print('Original_topics: ', desired_subjects)
+
     # Generating suggested topics and replacing innapropriate topics
     result = preparation_agent.invoke(updated_state)
     new_message = result['messages'][-1].content
@@ -92,18 +93,19 @@ def preparation_node(state: State):
     # Generating search queries
     for topic in updated_state.desired_subjects:
         web_query = f'{topic} news'
-        youtube_query = f'Find a recent video about {topic} related news within the last 3 days.'
+        youtube_query = f'{topic} news'
         updated_state.web_queries.append(web_query)
         updated_state.youtube_queries.append(youtube_query)
 
     # Updating message and next in local state
     updated_state.messages.append(SystemMessage(content=f"Suggested topics: {result}"))
     if (len(updated_state.desired_subjects) == 4 and len(updated_state.web_queries) == 4 and len(updated_state.youtube_queries) == 4):
-        updated_state.next = "search"
+        updated_state.next = "web"
     else:
         updated_state.next = "__end__"
 
     # Returning updated state and next node
+    print('Topics Chosen: ', updated_state.desired_subjects)
     return updated_state
 
 
@@ -112,29 +114,12 @@ web_agent = create_react_agent(
     model=search_llm,
     tools=[],
     state_modifier=SystemMessage(content="""
-    Your function is to perform web searches based on a query given to you. Given a 
-    web query, you must perform searches with your tool and retrieve exactly **one** relevant, 
-    **recent** article per query. 
-
-    **Important:** Only return a **single, valid article per query** (not multiple articles or summary pages).
-
-    **Rules to Follow Strictly:**
-    - Only return **1 article per query**.
-    - The article **must be from the last 7 days**.
-    - **Do NOT return summary pages** like https://www.reuters.com/technology/ or https://www.nytimes.com/section/science/.
-    - Ensure the article is **directly accessible** (not a paywalled summary).
-    
-    **Response Format (Must Be Valid JSON Only)**:
-    ```json
-    {
-        "link": "link_for_topic",
-        "summary": "summary_for_topic"
-    }
-    ```
-    
-    - **If a query does not return a valid article**, retry the search with adjusted keywords.
-    - **Do NOT return empty lists.**
-    - **Your response will be rejected if it does not have exactly 4 valid articles and summaries.**
+    Your function is to summarize articles from the web. You will be given a short 
+    description of an article and the raw parsed text from the web page. 
+                                 
+    Use both of these inputs to generate a two paragraph summary of the article. 
+    Make sure you highlight the key points. Return your summary as a string. Include 
+    as much detail as possible.
     """)
 )
 
@@ -192,13 +177,11 @@ def web_search(query: str, api_key, count=5, country="us", lang="en") -> List[di
 
             # Checking relevency
             if (stripped_query in selected_title or stripped_query in selected_description) and (selected_date > one_week_ago):
-                relevant_stories.append([selected_story, selected_description])
                 relevant_stories.append({
                     "url": selected_story,
                     "desc": selected_description
                 })
-            elif title_similarity > 0.7 or desc_similarity > 0.7: 
-                relevant_stories.append([selected_story, selected_description])
+            elif (title_similarity > 0.7 or desc_similarity > 0.7) and (selected_date > one_week_ago): 
                 relevant_stories.append({
                     "url": selected_story,
                     "desc": selected_description
@@ -255,30 +238,130 @@ def web_node(state: State):
             article_content = scrape_with_webbase(chosen_article['url'])
 
             if article_content and chosen_article:
-                # Querying web agent to generate summary of the article 
-                # TODO
+                # Generating article summary using web agent
+                local_state.messages = [(HumanMessage(content=f"The article description: {chosen_article['desc']} | The article raw text {article_content}"))]
+                result = web_agent.invoke(local_state)
+                new_message = result['messages'][-1].content
+                # Appending results
+                if len(new_message) > 0:
+                    local_state.web_links.append(chosen_article['url'])
+                    local_state.web_summaries.append(new_message)
+                    valid_result = True
             else:
                 article_urls = web_search(local_state.web_queries[i], api_key=os.getenv("BRAVE_API_KEY"), count=10)
                 if article_urls is None:
                     break
 
-            
-            breakpoint()
+    # Updating next in local state
+    if (len(local_state.web_links) > 0 and len(local_state.web_summaries) > 0 and len(local_state.web_links) == len(local_state.web_summaries)):
+        local_state.next = "video"
+    else:
+        local_state.next = "__end__"
 
-    breakpoint()
+    # Returning updated state and next node
+    return local_state
 
 
 # Defining the youtube agent
 
 
+# Video search function used to pull top youtube links
+def video_search(query: str, api_key, count=5, country="us", lang="en", freshness="pw") -> List[dict]:
+    """Takes in a query and returns a url of a youtube video"""
+    url = "https://api.search.brave.com/res/v1/videos/search"
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": api_key
+    }
+    params = {
+        "q": query,
+        "count": count,
+        "country": country,
+        "search_lang": lang,
+        "spellcheck": 1,
+        "freshness": freshness
+    }
+
+    response = requests.get(url, headers=headers, params=params)
+
+    if response.status_code == 200:
+        result = response.json()
+        relevant_videos: List[dict] = []
+        for video in result['results']:
+            # Gathering video values
+            selected_video: str = video['url']
+            selected_title: str = video['title']
+            selected_description : str = video['description']
+            selected_date = datetime.strptime(video['page_age'], "%Y-%m-%dT%H:%M:%S")
+            one_week_ago = datetime.now() - timedelta(days=7)
+            stripped_query = query.replace(" news", "")
+
+            # Generating embeddings
+            query_embedding = get_openai_embedding(stripped_query)
+            title_embedding = get_openai_embedding(selected_title)
+            desc_embedding = get_openai_embedding(selected_description)
+            title_similarity = cosine_similarity(query_embedding, title_embedding)
+            desc_similarity = cosine_similarity(query_embedding, desc_embedding)
+
+            # Checking relevency
+            if (stripped_query in selected_title or stripped_query in selected_description) and (selected_date > one_week_ago) and ('https://www.youtube.com' in selected_video):
+                relevant_videos.append({
+                    "url": selected_video,
+                    "desc": selected_description
+                })
+            elif (title_similarity > 0.7 or desc_similarity > 0.7) and (selected_date > one_week_ago) and ('https://www.youtube.com' in selected_video): 
+                relevant_videos.append({
+                    "url": selected_video,
+                    "desc": selected_description
+                })
+        if len(relevant_videos) > 0:
+            return relevant_videos
+        else:
+            return None
+    else:
+        print(f"Error: {response.status_code} - {response.text}")
+        return None
+
+
 # Defining youtube node
+def youtube_node(state: State):
+    """
+    YouTube search node responsible for gathering exactly 4 links and summaries for youtube videos.
+    """
+    # Pulling state locally
+    local_state = state.model_copy()
+    
+    # Looping through the topics and performing video search query 
+    for i in range(len(local_state.youtube_queries)):
+        valid_result: bool = False
+        while not valid_result:
+            # Querying video search
+            chosen_video: dict = None
+            video_urls = video_search(local_state.youtube_queries[i], api_key=os.getenv("BRAVE_API_KEY"))
+
+            # Checking result of video_url and retrying if failed
+            if video_urls is None:
+                video_urls = video_search(local_state.web_queries[i], api_key=os.getenv("BRAVE_API_KEY"), count=10)
+                if video_urls is None:
+                    break
+
+            # Checking result of video_url and choosing a random video
+            else:
+                chosen_video = random.choice(video_urls)
+
+            breakpoint()
+            # TODO - Add retry for API rate limiting or try to sleep between each loop to avoid
+            # TODO - Figure out how to get video summaries -> 
 
 
 # Defining the conditional edge router
 def router(state: State):
     current_state = state.model_copy()
-    if current_state.next == 'search':
-        return 'web_node'   # ['web_node', 'youtube_node']
+    if current_state.next == 'web':
+        return 'web_node'
+    elif current_state.next == 'video':
+        return 'youtube_node'
     elif current_state.next == '__end__':
         return '__end__'
     else:
@@ -290,7 +373,9 @@ builder.add_edge(START, "preparation_node")
 builder.add_node("preparation_node", preparation_node)
 builder.add_conditional_edges('preparation_node', router)
 builder.add_node('web_node', web_node)
-builder.add_edge('web_node', END)
+builder.add_conditional_edges('web_node', router)
+builder.add_node('youtube_node', youtube_node)
+builder.add_edge('youtube_node', END)
 graph = builder.compile()
     
 

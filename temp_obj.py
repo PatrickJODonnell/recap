@@ -4,6 +4,7 @@ topics = [
     "Jared McCain",
     "Philadelphia Eagles",
     "Technology",
-    "Cocain",
-    "Murder"
+    "Cocaine",
+    "Murder", 
+    "Artificial Intelligence"
 ]
