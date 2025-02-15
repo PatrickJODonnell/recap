@@ -1,3 +1,4 @@
+import time
 from typing import List
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
@@ -16,6 +17,7 @@ from langchain.document_loaders import WebBaseLoader
 from datetime import datetime, timedelta
 import openai
 import numpy as np
+import yt_dlp
 
 
 # Loading env variables
@@ -50,8 +52,8 @@ preparation_agent = create_react_agent(
     model=llm, tools=[], state_modifier=SystemMessage(content="""
     Your function is to suggest new topics of interest until you have 4 topics. Given a list of desired_subjects. 
     you should determine how many additional topics that you need to suggest. Once you determine this number,
-    suggest topics that are similar to the ones initially provided. Also, if any of the topics would be deemed illegal,
-    replace them with another suggested topic.
+    suggest topics or youtubers that are similar to the ones initially provided. Also, if any of the topics would be deemed illegal,
+    replace them with another suggested topic or youtuber.
 
     For example, if ['NBA', 'Murder'] is provided, you could suggest topics like 'NFL', 'NHL', 'WNBA' and respond with
     ['NBA', 'NFL', 'NHL', 'WNBA']                                                                                                    
@@ -93,7 +95,7 @@ def preparation_node(state: State):
     # Generating search queries
     for topic in updated_state.desired_subjects:
         web_query = f'{topic} news'
-        youtube_query = f'{topic} news'
+        youtube_query = f'site:youtube.com {topic}'
         updated_state.web_queries.append(web_query)
         updated_state.youtube_queries.append(youtube_query)
 
@@ -204,8 +206,8 @@ def scrape_with_webbase(url: str) -> str:
         loader = WebBaseLoader(url)
         docs = loader.load()
         return docs[0].page_content if docs else "No readable content found."
-    except Exception as e:
-        return f"Failed to fetch the webpage: {e}"
+    except Exception:
+        return None
     
 
 # Web node with enforced 4 valid articles
@@ -222,10 +224,12 @@ def web_node(state: State):
         while not valid_result:
             # Querying news search
             chosen_article: dict = None
+            time.sleep(1)
             article_urls = web_search(local_state.web_queries[i], api_key=os.getenv("BRAVE_API_KEY"))
 
             # Checking result of article_url and retrying if failed
             if article_urls is None:
+                time.sleep(1)
                 article_urls = web_search(local_state.web_queries[i], api_key=os.getenv("BRAVE_API_KEY"), count=10)
                 if article_urls is None:
                     break
@@ -262,11 +266,27 @@ def web_node(state: State):
     return local_state
 
 
-# Defining the youtube agent
+# Youtube channel search
+def get_youtube_videos(channel_url) -> dict:
+    """Fetches video links from a YouTube channel using yt_dlp."""
+    ydl_opts = {
+        "quiet": True,
+        "extract_flat": False,  # Don't download, just extract metadata
+        "skip_download": True
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl: # TODO - only get videos from the last week
+        info = ydl.extract_info(channel_url, download=False)
+        upload_date = datetime.strptime(info['entries'][0]['upload_date'], "%Y%m%d").strftime("%Y-%m-%d")
+        seven_days_ago = datetime.now() - timedelta(days=7)
+        if upload_date > seven_days_ago:
+            return {"title": info['entries'][0]["title"], "url": info['entries'][0]["url"]}
+        else:
+            return None
 
 
 # Video search function used to pull top youtube links
-def video_search(query: str, api_key, count=5, country="us", lang="en", freshness="pw") -> List[dict]:
+def video_search(query: str, api_key, count=10, country="us", lang="en", freshness="pw") -> List[dict]:
     """Takes in a query and returns a url of a youtube video"""
     url = "https://api.search.brave.com/res/v1/videos/search"
     headers = {
@@ -293,9 +313,14 @@ def video_search(query: str, api_key, count=5, country="us", lang="en", freshnes
             selected_video: str = video['url']
             selected_title: str = video['title']
             selected_description : str = video['description']
+            selected_length: str = None
+            try:
+                selected_length = video['video']['duration']
+            except Exception:
+                selected_length = None
             selected_date = datetime.strptime(video['page_age'], "%Y-%m-%dT%H:%M:%S")
             one_week_ago = datetime.now() - timedelta(days=7)
-            stripped_query = query.replace(" news", "")
+            stripped_query = query.replace(" news", "").replace("site:youtube.com ", "")
 
             # Generating embeddings
             query_embedding = get_openai_embedding(stripped_query)
@@ -304,16 +329,37 @@ def video_search(query: str, api_key, count=5, country="us", lang="en", freshnes
             title_similarity = cosine_similarity(query_embedding, title_embedding)
             desc_similarity = cosine_similarity(query_embedding, desc_embedding)
 
+            # Checking time
+            isTimeValid: bool = False
+            if selected_length is not None:
+                parts = list(map(int, selected_length.split(":")))
+                if len(parts) == 3:  # Format: HH:MM:SS
+                    h, m, s = parts
+                    seconds = timedelta(hours=h, minutes=m, seconds=s).total_seconds()
+                    if seconds > 120 <= 1500:
+                        isTimeValid = True
+                elif len(parts) == 2:  # Format: MM:SS
+                    h, m, s = 0, parts[0], parts[1]
+                    seconds = timedelta(hours=h, minutes=m, seconds=s).total_seconds()
+                    if seconds > 180 <= 1500:
+                        isTimeValid = True
+
+            print(stripped_query)
+            print(selected_video)
+            print(selected_title)
+            print(title_similarity)
+            print(desc_similarity)
+                     
             # Checking relevency
-            if (stripped_query in selected_title or stripped_query in selected_description) and (selected_date > one_week_ago) and ('https://www.youtube.com' in selected_video):
+            if (stripped_query in selected_title or stripped_query in selected_description) and (selected_date > one_week_ago) and ('https://www.youtube.com' in selected_video) and (selected_length is not None and isTimeValid):
                 relevant_videos.append({
+                    "title": selected_title,
                     "url": selected_video,
-                    "desc": selected_description
                 })
-            elif (title_similarity > 0.7 or desc_similarity > 0.7) and (selected_date > one_week_ago) and ('https://www.youtube.com' in selected_video): 
+            elif (title_similarity > 0.7 or desc_similarity > 0.7) and (selected_date > one_week_ago) and ('https://www.youtube.com' in selected_video) and (selected_length is not None and isTimeValid): 
                 relevant_videos.append({
+                    "title": selected_title,
                     "url": selected_video,
-                    "desc": selected_description
                 })
         if len(relevant_videos) > 0:
             return relevant_videos
@@ -322,7 +368,7 @@ def video_search(query: str, api_key, count=5, country="us", lang="en", freshnes
     else:
         print(f"Error: {response.status_code} - {response.text}")
         return None
-
+    
 
 # Defining youtube node
 def youtube_node(state: State):
@@ -336,22 +382,35 @@ def youtube_node(state: State):
     for i in range(len(local_state.youtube_queries)):
         valid_result: bool = False
         while not valid_result:
+            # Determining if this this is a youtube channel
+            scrape_result = scrape_with_webbase(f'https://www.youtube.com/@{local_state.desired_subjects[i]}/videos')
+            if scrape_result != '404 Not Found' or scrape_result is not None:
+                # This is a youtube profile. Grabbing the most recent video
+                chosen_video = get_youtube_videos(f'https://www.youtube.com/@{local_state.desired_subjects[i]}/videos')
+
+                # TODO - Figure out how to get video summaries -> 
+
+                breakpoint()
+                break
+
             # Querying video search
             chosen_video: dict = None
+            time.sleep(1)
             video_urls = video_search(local_state.youtube_queries[i], api_key=os.getenv("BRAVE_API_KEY"))
 
             # Checking result of video_url and retrying if failed
             if video_urls is None:
-                video_urls = video_search(local_state.web_queries[i], api_key=os.getenv("BRAVE_API_KEY"), count=10)
+                time.sleep(1)
+                video_urls = video_search(local_state.web_queries[i] + ' news', api_key=os.getenv("BRAVE_API_KEY"), count=20)
                 if video_urls is None:
                     break
+                else:
+                    chosen_video = random.choice(video_urls)
 
             # Checking result of video_url and choosing a random video
             else:
                 chosen_video = random.choice(video_urls)
-
-            breakpoint()
-            # TODO - Add retry for API rate limiting or try to sleep between each loop to avoid
+            
             # TODO - Figure out how to get video summaries -> 
 
 

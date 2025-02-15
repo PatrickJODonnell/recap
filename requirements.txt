@@ -8,3 +8,4 @@ langchain-community
 flask
 beautifulsoup4
 lxml
+yt-dlp[default]
