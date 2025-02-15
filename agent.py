@@ -343,12 +343,6 @@ def video_search(query: str, api_key, count=10, country="us", lang="en", freshne
                     seconds = timedelta(hours=h, minutes=m, seconds=s).total_seconds()
                     if seconds > 180 <= 1500:
                         isTimeValid = True
-
-            print(stripped_query)
-            print(selected_video)
-            print(selected_title)
-            print(title_similarity)
-            print(desc_similarity)
                      
             # Checking relevency
             if (stripped_query in selected_title or stripped_query in selected_description) and (selected_date > one_week_ago) and ('https://www.youtube.com' in selected_video) and (selected_length is not None and isTimeValid):
@@ -410,8 +404,13 @@ def youtube_node(state: State):
             # Checking result of video_url and choosing a random video
             else:
                 chosen_video = random.choice(video_urls)
+
+            if chosen_video:
+                local_state.youtube_links.append(chosen_video)
+                # TODO - Figure out how to get video summaries -> 
+
             
-            # TODO - Figure out how to get video summaries -> 
+    breakpoint()
 
 
 # Defining the conditional edge router
