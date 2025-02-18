@@ -9,3 +9,4 @@ flask
 beautifulsoup4
 lxml
 yt-dlp[default]
+deepgram-sdk

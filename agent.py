@@ -18,6 +18,11 @@ from datetime import datetime, timedelta
 import openai
 import numpy as np
 import yt_dlp
+from deepgram.utils import verboselogs
+from deepgram import (
+    DeepgramClient,
+    PrerecordedOptions,
+)
 
 
 # Loading env variables
@@ -52,8 +57,8 @@ preparation_agent = create_react_agent(
     model=llm, tools=[], state_modifier=SystemMessage(content="""
     Your function is to suggest new topics of interest until you have 4 topics. Given a list of desired_subjects. 
     you should determine how many additional topics that you need to suggest. Once you determine this number,
-    suggest topics or youtubers that are similar to the ones initially provided. Also, if any of the topics would be deemed illegal,
-    replace them with another suggested topic or youtuber.
+    suggest topics that are similar to the ones initially provided. Also, if any of the topics would be deemed illegal,
+    replace them with another suggested topic.
 
     For example, if ['NBA', 'Murder'] is provided, you could suggest topics like 'NFL', 'NHL', 'WNBA' and respond with
     ['NBA', 'NFL', 'NHL', 'WNBA']                                                                                                    
@@ -272,7 +277,11 @@ def get_youtube_videos(channel_url) -> dict:
     ydl_opts = {
         "quiet": True,
         "extract_flat": False,  # Don't download, just extract metadata
-        "skip_download": True
+        "skip_download": True,
+        "cookiefile": 'cookies.txt',
+        "no_warnings": True,
+        "verbose": True,
+        "playlistend": 1,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl: # TODO - only get videos from the last week
@@ -371,6 +380,9 @@ def youtube_node(state: State):
     """
     # Pulling state locally
     local_state = state.model_copy()
+
+    # Creating deepgram client for transcribing logs
+    deepgram: DeepgramClient = DeepgramClient(api_key=os.getenv('DEEPGRAM_API_KEY'))
     
     # Looping through the topics and performing video search query 
     for i in range(len(local_state.youtube_queries)):
@@ -382,7 +394,16 @@ def youtube_node(state: State):
                 # This is a youtube profile. Grabbing the most recent video
                 chosen_video = get_youtube_videos(f'https://www.youtube.com/@{local_state.desired_subjects[i]}/videos')
 
-                # TODO - Figure out how to get video summaries -> 
+                # Transcribing video into text
+                options = PrerecordedOptions(
+                    model="nova-3",
+                    smart_format=True,
+                    detect={"muted": True},
+                )
+                transcribe_response = deepgram.listen.rest.v("1").transcribe_url(chosen_video['url'], options)
+
+                transcript = transcribe_response.results.channels[0].alternatives[0].transcript
+                confidence = transcribe_response.results.channels[0].alternatives[0].confidence
 
                 breakpoint()
                 break
@@ -406,8 +427,20 @@ def youtube_node(state: State):
                 chosen_video = random.choice(video_urls)
 
             if chosen_video:
+                # Transcribing video into text
+                options = PrerecordedOptions(
+                    model="nova-3",
+                    smart_format=True,
+                    detect={"muted": True},
+                )
+                transcribe_response = deepgram.listen.rest.v("1").transcribe_url(chosen_video['url'], options)
+
+                transcript = transcribe_response.results.channels[0].alternatives[0].transcript
+                confidence = transcribe_response.results.channels[0].alternatives[0].confidence
+
+                breakpoint()
+
                 local_state.youtube_links.append(chosen_video)
-                # TODO - Figure out how to get video summaries -> 
 
             
     breakpoint()
