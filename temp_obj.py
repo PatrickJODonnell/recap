@@ -3,9 +3,9 @@ topics = [
     "itscodytrains",
     "jaredmccain024",
     "codyko2",
-    # "Philadelphia Eagles",
-    # "Technology",
-    # "Cocaine",
-    # "Murder", 
-    # "Artificial Intelligence"
+    "Philadelphia Eagles",
+    "Technology",
+    "Cocaine",
+    "Murder", 
+    "Artificial Intelligence"
 ]
