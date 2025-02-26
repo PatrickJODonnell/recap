@@ -4,8 +4,9 @@ topics = [
     "jaredmccain024",
     "codyko2",
     "Philadelphia Eagles",
+    "Buffalo Bills",
     "Technology",
-    "Cocaine",
-    "Murder", 
-    "Artificial Intelligence"
+    "Artificial Intelligence",
+    "Jimmy Butler",
+    "Golden State Warriors"
 ]
