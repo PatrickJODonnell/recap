@@ -4,7 +4,7 @@ from typing import List
 import requests
 from langgraph.prebuilt import create_react_agent
 from state import State
-from utils import cosine_similarity, get_openai_embedding, scrape_with_webbase
+from utils import retry, cosine_similarity, get_openai_embedding, scrape_with_webbase
 from llms import search_llm
 from langchain_core.messages import SystemMessage, HumanMessage
 from deepgram import (
@@ -89,13 +89,16 @@ def video_search(query: str, api_key, count=10, country="US", lang="en") -> List
             selected_video: str = video['url']
             selected_title: str = video['title']
             selected_description: str = video['description']
-            selected_age: str = datetime.strptime(video['page_age'], "%Y-%m-%dT%H:%M:%S")
             selected_length: str = None
             try:
                 selected_length = video['video']['duration']
             except Exception:
                 selected_length = None
-            selected_date = datetime.strptime(video['page_age'], "%Y-%m-%dT%H:%M:%S")
+            selected_date: datetime = None
+            try:
+                selected_date = datetime.strptime(video['page_age'], "%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                selected_date = None
             one_week_ago = datetime.now() - timedelta(days=7)
             stripped_query = query.replace(" news", "").replace("site:youtube.com ", "")
 
@@ -122,16 +125,18 @@ def video_search(query: str, api_key, count=10, country="US", lang="en") -> List
                         isTimeValid = True
 
             # Checking age
-            seven_days_ago = datetime.now() - timedelta(days=7)
-            isRecent = selected_age > seven_days_ago
+            isRecent: bool = False
+            if (selected_date):
+                seven_days_ago = datetime.now() - timedelta(days=7)
+                isRecent = selected_date > seven_days_ago
                      
             # Checking relevency
-            if (stripped_query in selected_title or stripped_query in selected_description) and (selected_date > one_week_ago) and ('https://www.youtube.com' in selected_video) and (selected_length is not None and isTimeValid) and (isRecent):
+            if (stripped_query in selected_title or stripped_query in selected_description) and ('https://www.youtube.com' in selected_video) and (selected_length is not None and isTimeValid) and (isRecent):
                 relevant_videos.append({
                     "title": selected_title,
                     "url": selected_video,
                 })
-            elif (title_similarity > 0.78 or desc_similarity > 0.78) and (selected_date > one_week_ago) and ('https://www.youtube.com' in selected_video) and (selected_length is not None and isTimeValid) and (isRecent): 
+            elif (title_similarity > 0.78 or desc_similarity > 0.78) and ('https://www.youtube.com' in selected_video) and (selected_length is not None and isTimeValid) and (isRecent): 
                 relevant_videos.append({
                     "title": selected_title,
                     "url": selected_video,
@@ -143,6 +148,18 @@ def video_search(query: str, api_key, count=10, country="US", lang="en") -> List
     else:
         print(f"Error: {response.status_code} - {response.text}")
         return None
+    
+@retry(max_retries=3, retry_delay=5)
+def transcribe_video(audio_file_name: str, deepgram: DeepgramClient, payload: FileSource) -> str:
+    print('Transcribing video')
+    with open(f'{audio_file_name}.mp3', "rb"):
+        options = PrerecordedOptions(
+            model="nova-3",
+            smart_format=True
+        )
+    transcribe_response = deepgram.listen.rest.v("1").transcribe_file(payload, options)
+    transcript = transcribe_response.results.channels[0].alternatives[0].transcript
+    return transcript
     
 
 # youtube agent
@@ -195,14 +212,7 @@ def youtube_node(state: State):
                 }
 
                 # Transcribing video into text
-                print('Transcribing video')
-                with open(f'{audio_file_name}.mp3', "rb"):
-                    options = PrerecordedOptions(
-                        model="nova-3",
-                        smart_format=True
-                    )
-                transcribe_response = deepgram.listen.rest.v("1").transcribe_file(payload, options)
-                transcript = transcribe_response.results.channels[0].alternatives[0].transcript
+                transcript = transcribe_video(audio_file_name=audio_file_name, deepgram=deepgram, payload=payload)
 
                 # Summarizing transcript
                 print('Summarizing video')
@@ -254,13 +264,7 @@ def youtube_node(state: State):
             }
 
             # Transcribing video into text
-            with open(f'{audio_file_name}.mp3', "rb"):
-                options = PrerecordedOptions(
-                    model="nova-3",
-                    smart_format=True
-                )
-            transcribe_response = deepgram.listen.rest.v("1").transcribe_file(payload, options)
-            transcript = transcribe_response.results.channels[0].alternatives[0].transcript
+            transcript = transcribe_video(audio_file_name=audio_file_name, deepgram=deepgram, payload=payload)
 
             # Summarizing transcript
             print('Summarizing generic video')

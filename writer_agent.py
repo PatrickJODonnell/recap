@@ -17,6 +17,8 @@ writer_agent = create_react_agent(
                                  
     Try your best to make the excerpt interesting and clever. You may include some humor too,
     but don't overdo it. Try to sound natural and human-like.
+                                 
+    Avoid using pointless similies and metaphors.
 
     Return your summary as a string.                                                          
     """)
