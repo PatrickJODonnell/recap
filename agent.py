@@ -8,6 +8,7 @@ from web_agent import web_node
 from youtube_agent import youtube_node
 from writer_agent import writer_node
 from state import State
+from prefect import flow
 
 # Loading env variables
 load_dotenv()
@@ -47,9 +48,10 @@ builder.add_edge('proofing_node', END)
 graph = builder.compile()
 
 # Function call for running agent
+# @flow(log_prints=True)
 async def invoke_agent():
     initial_state = State()
-    result = graph.invoke(initial_state)
+    result = await graph.ainvoke(initial_state)
     # TODO - Write this stuff off to a database
     breakpoint()
     return result

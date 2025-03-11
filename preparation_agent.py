@@ -7,6 +7,7 @@ import ast
 from temp_obj import topics
 from typing import List
 import random
+from utils import connectToFirestore
 
 # Defining the preparation agent
 preparation_agent = create_react_agent(
@@ -25,12 +26,15 @@ preparation_agent = create_react_agent(
 
 
 # Defining preparation node
-def preparation_node(state: State):
+async def preparation_node(state: State):
     """
     Preparation node responsible for gathering topics, suggesting a topic, determining if topics are appropriate, and return search queries.
     """
     # Pulling topics from database (for now just pulling from a dict)
     print('-----Running Preparation Node-----')
+    db = await connectToFirestore()
+    stuff = db.collection('Users')
+    breakpoint()
     topic_length = len(topics)
     desired_subjects: List[str] = []
     if topic_length >= 3:

@@ -3,6 +3,9 @@ import httpx
 import openai
 import numpy as np
 from langchain.document_loaders import WebBaseLoader
+import firebase_admin
+from firebase_admin import credentials, firestore
+from prefect.blocks.system import Secret
 
 def get_openai_embedding(text: str):
     """Generates an embedding using OpenAI's `text-embedding-ada-002` model."""
@@ -48,3 +51,12 @@ def retry(max_retries=3, retry_delay=5):
         return wrapper
 
     return decorator
+
+async def connectToFirestore():
+    """ Util function used to connect to firestore """
+    firebase_secret_block = await Secret.load("firebase-config")
+    firebase_secret = firebase_secret_block.get()
+    firebase_creds = credentials.Certificate(firebase_secret)
+    firebase_admin.initialize_app(firebase_creds)
+    db = firestore.client()
+    return db
