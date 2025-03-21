@@ -1,5 +1,6 @@
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
+from prefect import task
 from llms import writing_llm
 from state import State
 

@@ -1,13 +1,10 @@
+from prefect import task
 from llms import llm
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
 from state import State
 import re
 import ast
-from temp_obj import topics
-from typing import List
-import random
-from utils import connectToFirestore
 
 # Defining the preparation agent
 preparation_agent = create_react_agent(
@@ -32,21 +29,11 @@ async def preparation_node(state: State):
     """
     # Pulling topics from database (for now just pulling from a dict)
     print('-----Running Preparation Node-----')
-    db = await connectToFirestore()
-    stuff = db.collection('Users')
-    breakpoint()
-    topic_length = len(topics)
-    desired_subjects: List[str] = []
-    if topic_length >= 3:
-        desired_subjects = random.sample(topics, 3)
-    else:
-        desired_subjects = topics
 
     # Updating local state
-    updated_state = state.model_copy(update={"desired_subjects": desired_subjects})
-    updated_state.messages.append(HumanMessage(content=f"desired_subjects: {desired_subjects}"))
+    updated_state = state.model_copy()
 
-    print('Original_topics: ', desired_subjects)
+    print('Original_topics: ', updated_state.desired_subjects)
 
     # Generating suggested topics and replacing innapropriate topics
     result = preparation_agent.invoke(updated_state)

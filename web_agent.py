@@ -1,4 +1,5 @@
 from langgraph.prebuilt import create_react_agent
+from prefect import task
 from llms import search_llm
 from langchain_core.messages import SystemMessage, HumanMessage
 import requests

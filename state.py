@@ -18,4 +18,5 @@ class State(BaseModel):
     web_final_summaries: List[str] = []
     youtube_final_summaries: List[str] = []
     # For All
+    user: str = None
     next: str = None
