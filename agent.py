@@ -16,7 +16,7 @@ from utils import connectToFirestore
 from langchain_core.messages import HumanMessage
 
 # Loading env variables
-load_dotenv()
+load_dotenv(override=True)
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
@@ -100,7 +100,12 @@ async def process_users():
             tasks.append(invoke_agent(user_obj))
 
         results = await asyncio.gather(*tasks)
-        breakpoint()
-        # TODO - PARSE RESULTS AND ADD THEM TO DB
-    breakpoint()
+        for result in results:
+            db.collection('Newsletters').add({
+                "userId": result['user'],
+                "webLinks": result['web_links'],
+                "youtubeLinks": result['youtube_links'],
+                "webFinalSummaries": result['web_final_summaries'],
+                "youtubeFinalSummaries": result['youtube_final_summaries']
+            })
 
