@@ -33,6 +33,8 @@ def router(state: State):
         return 'proofing_node'
     elif current_state.next == '__end__':
         return '__end__'
+    elif current_state.next == 'title':
+        return 'title_node'
     else:
         return '__end__'
 
@@ -49,7 +51,9 @@ builder.add_conditional_edges('youtube_node', router)
 builder.add_node('writer_node', writer_node)
 builder.add_conditional_edges('writer_node', router)
 builder.add_node('proofing_node', proofing_node)
-builder.add_edge('proofing_node', END)
+builder.add_conditional_edges('proofing_node', router)
+builder.add_node('title_node', proofing_node)
+builder.add_edge('title_node', END)
 graph = builder.compile()
 
 
@@ -106,6 +110,8 @@ async def process_users():
                 "webLinks": result['web_links'],
                 "youtubeLinks": result['youtube_links'],
                 "webFinalSummaries": result['web_final_summaries'],
-                "youtubeFinalSummaries": result['youtube_final_summaries']
+                "youtubeFinalSummaries": result['youtube_final_summaries'],
+                "webFinalTitles": result['web_final_titles'],
+                "youtubeFinalTitles": result['youtube_final_summaries']
             })
 

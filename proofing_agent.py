@@ -54,7 +54,7 @@ def proofing_node(state: State):
 
     # Updating next in local state
     if (len(local_state.web_final_summaries) > 0 and len(local_state.youtube_final_summaries) > 0 and len(local_state.web_final_summaries) == len(local_state.web_links) and len(local_state.youtube_final_summaries) == len(local_state.youtube_links)):
-        local_state.next = "save"
+        local_state.next = "title"
     else:
         local_state.next = "__end__"
 

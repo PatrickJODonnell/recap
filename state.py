@@ -17,6 +17,9 @@ class State(BaseModel):
     # For Write / Proof
     web_final_summaries: List[str] = []
     youtube_final_summaries: List[str] = []
+    # For Title Maker
+    web_final_titles: List[str] = []
+    youtube_final_titles: List[str] = []
     # For All
     user: str = None
     next: str = None
