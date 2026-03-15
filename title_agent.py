@@ -1,4 +1,4 @@
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
 
 from llms import writing_llm
@@ -8,17 +8,15 @@ from state import State
 title_agent = create_react_agent(
     model=writing_llm,
     tools=[],
-    state_modifier=SystemMessage(
-        content="""
-    Your function is to come up with creative article titles based on a summary. 
+    prompt="""
+    Your function is to come up with creative article titles based on a summary.
     You will be given a summary of a web article or a youtube video.
 
     Ensure that your title is no more than 6 words. Make sure that the title is
     creative and properly summarizes the content.
 
     Return ONLY the title as a string - no explanations, no quotes, just the title text.
-    """
-    ),
+    """,
 )
 
 

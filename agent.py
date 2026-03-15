@@ -109,6 +109,8 @@ async def process_users():
 
         results = await asyncio.gather(*tasks)
         for result in results:
+            if result is None:
+                continue
             db.collection("Newsletters").add(
                 {
                     "userId": result["user"],

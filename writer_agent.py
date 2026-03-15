@@ -1,4 +1,4 @@
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
 
 from llms import writing_llm
@@ -8,25 +8,23 @@ from state import State
 writer_agent = create_react_agent(
     model=writing_llm,
     tools=[],
-    state_modifier=SystemMessage(
-        content="""
-    Your function is to write descriptive and creative one-paragraph                              
-    excepts. You will be given either the summary of a web article or the 
+    prompt="""
+    Your function is to write descriptive and creative one-paragraph
+    excepts. You will be given either the summary of a web article or the
     summary of a youtube video.
 
     Ensure that your excerpt is no more than 5 sentences. Make sure to highlight key points
     and make your writing as interesting as possible.
-                                 
+
     Try your best to make the excerpt interesting and clever. You may include some humor too,
     but don't overdo it. Try to sound natural and human-like.
-                                 
+
     Avoid using pointless similies and metaphors.
 
     Avoid including a small title like sequence at the beginning of the excerpt.
 
-    Return your summary as a string.                                                          
-    """
-    ),
+    Return your summary as a string.
+    """,
 )
 
 

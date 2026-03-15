@@ -11,21 +11,19 @@ from state import State
 preparation_agent = create_react_agent(
     model=llm,
     tools=[],
-    state_modifier=SystemMessage(
-        content="""
-    Your function is to suggest new topics of interest until you have 4 topics. Given a list of desired_subjects. 
+    prompt="""
+    Your function is to suggest new topics of interest until you have 4 topics. Given a list of desired_subjects.
     you should determine how many additional topics that you need to suggest. Once you determine this number,
     suggest topics that are similar to the ones initially provided. Also, if any of the topics would be deemed illegal,
     replace them with another suggested topic.
 
     For example, if ['NBA', 'Murder'] is provided, you could suggest topics like 'NFL', 'NHL', 'WNBA' and respond with
-    ['NBA', 'NFL', 'NHL', 'WNBA']    
+    ['NBA', 'NFL', 'NHL', 'WNBA']
 
-    If topics are not innappropriate or illegal, you should NOT replace them with another suggested topic.                                                                                                
+    If topics are not innappropriate or illegal, you should NOT replace them with another suggested topic.
 
     Your response should start with: TOPICS: [topic1, topic2, topic3, topic4].
-    """
-    ),
+    """,
 )
 
 

@@ -1,4 +1,4 @@
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
 
 from llms import writing_llm
@@ -8,20 +8,18 @@ from state import State
 proofing_agent = create_react_agent(
     model=writing_llm,
     tools=[],
-    state_modifier=SystemMessage(
-        content="""
+    prompt="""
     Your function is to proofread an excerpt. You should correct any grammatical
-    mistakes that you find and also make the writing sound more human like. 
-                                 
+    mistakes that you find and also make the writing sound more human like.
+
     You will be given a paragraph written by a different agent. Take this excerpt and
-    make the writing sound more casual and natural (for example, replace any words that 
+    make the writing sound more casual and natural (for example, replace any words that
     aren't typically used in everyday conversation).
-                                 
+
     Ensure that you return a result that is still around 5 sentences long.
 
-    Return your summary as a string.                                                          
-    """
-    ),
+    Return your summary as a string.
+    """,
 )
 
 

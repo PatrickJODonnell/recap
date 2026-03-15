@@ -1,4 +1,4 @@
-langgraph 
+langgraph>=0.2.0,<1.0.0
 langsmith 
 langchain-openai
 langchain

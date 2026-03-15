@@ -1,7 +1,8 @@
+from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
 from prefect import task
+
 from llms import search_llm
-from langchain_core.messages import SystemMessage, HumanMessage
 import requests
 from typing import List
 from datetime import datetime, timedelta
@@ -17,14 +18,14 @@ from utils import cosine_similarity, get_openai_embedding, scrape_with_webbase
 web_agent = create_react_agent(
     model=search_llm,
     tools=[],
-    state_modifier=SystemMessage(content="""
-    Your function is to summarize articles from the web. You will be given a short 
-    description of an article and the raw parsed text from the web page. 
-                                 
-    Use both of these inputs to generate a two paragraph summary of the article. 
-    Make sure you highlight the key points. Return your summary as a string. Include 
+    prompt="""
+    Your function is to summarize articles from the web. You will be given a short
+    description of an article and the raw parsed text from the web page.
+
+    Use both of these inputs to generate a two paragraph summary of the article.
+    Make sure you highlight the key points. Return your summary as a string. Include
     as much detail as possible.
-    """)
+    """,
 )
 
 # Web search function used to pull top news links

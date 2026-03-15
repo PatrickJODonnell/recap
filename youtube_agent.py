@@ -7,12 +7,8 @@ from typing import List
 
 import requests
 import yt_dlp
-from deepgram import (
-    DeepgramClient,
-    FileSource,
-    PrerecordedOptions,
-)
-from langchain_core.messages import HumanMessage, SystemMessage
+from deepgram import DeepgramClient
+from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
 
 from llms import search_llm
@@ -161,11 +157,12 @@ def video_search(query: str, api_key, count=10, country="US", lang="en") -> List
 
 
 @retry(max_retries=3, retry_delay=5)
-def transcribe_video(audio_path: str, deepgram: DeepgramClient, payload: FileSource) -> str:
+def transcribe_video(audio_path: str, deepgram: DeepgramClient, payload: dict) -> str:
     print("Transcribing video")
-    with open(audio_path, "rb"):
-        options = PrerecordedOptions(model="nova-3", smart_format=True)
-    transcribe_response = deepgram.listen.rest.v("1").transcribe_file(payload, options)
+    # Deepgram SDK v3: listen.v1.media.transcribe_file(request=bytes, model=..., smart_format=...)
+    transcribe_response = deepgram.listen.v1.media.transcribe_file(
+        request=payload["buffer"], model="nova-3", smart_format=True
+    )
     transcript = transcribe_response.results.channels[0].alternatives[0].transcript
     return transcript
 
@@ -174,16 +171,14 @@ def transcribe_video(audio_path: str, deepgram: DeepgramClient, payload: FileSou
 youtube_agent = create_react_agent(
     model=search_llm,
     tools=[],
-    state_modifier=SystemMessage(
-        content="""
+    prompt="""
     Your function is to summarize youtube videos. You will be given the
     the title of a video and a transcription of the video.
-                                 
-    Use both of these inputs to generate a two paragraph summary of the video. 
-    Make sure you highlight the key points. Return your summary as a string. Include 
+
+    Use both of these inputs to generate a two paragraph summary of the video.
+    Make sure you highlight the key points. Return your summary as a string. Include
     as much detail as possible.
-    """
-    ),
+    """,
 )
 
 
@@ -222,9 +217,7 @@ def youtube_node(state: State):
                 # Writing file to a buffer
                 with open(audio_path, "rb") as file:
                     buffer_data = file.read()
-                payload: FileSource = {
-                    "buffer": buffer_data,
-                }
+                payload = {"buffer": buffer_data}
 
                 # Transcribing video into text
                 transcript = transcribe_video(audio_path=audio_path, deepgram=deepgram, payload=payload)
@@ -281,9 +274,7 @@ def youtube_node(state: State):
             # Writing file to a buffer
             with open(audio_path, "rb") as file:
                 buffer_data = file.read()
-            payload: FileSource = {
-                "buffer": buffer_data,
-            }
+            payload = {"buffer": buffer_data}
 
             # Transcribing video into text
             transcript = transcribe_video(audio_path=audio_path, deepgram=deepgram, payload=payload)

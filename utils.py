@@ -6,7 +6,7 @@ import httpx
 import numpy as np
 import openai
 from firebase_admin import credentials, firestore
-from langchain.document_loaders import WebBaseLoader
+from langchain_community.document_loaders import WebBaseLoader
 from prefect.blocks.system import Secret
 
 
