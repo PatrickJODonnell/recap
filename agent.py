@@ -110,6 +110,7 @@ async def process_users():
         results = await asyncio.gather(*tasks)
         for result in results:
             if result is None:
+                print("Result is None, skipping")
                 continue
             db.collection("Newsletters").add(
                 {
