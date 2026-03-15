@@ -1,19 +1,22 @@
 import asyncio
+import os
 import random
 from typing import List
-from langgraph.graph import StateGraph, START, END
-import os
-from dotenv import load_dotenv
+
 import openai
+from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage
+from langgraph.graph import END, START, StateGraph
+from prefect import flow, task
+
 from preparation_agent import preparation_node
 from proofing_agent import proofing_node
-from web_agent import web_node
-from youtube_agent import youtube_node
-from writer_agent import writer_node
 from state import State
-from prefect import flow, task
+from title_agent import title_node
 from utils import connectToFirestore
-from langchain_core.messages import HumanMessage
+from web_agent import web_node
+from writer_agent import writer_node
+from youtube_agent import youtube_node
 
 # Loading env variables
 load_dotenv(override=True)
@@ -23,57 +26,57 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 # Defining the conditional edge router
 def router(state: State):
     current_state = state.model_copy()
-    if current_state.next == 'web':
-        return 'web_node'
-    elif current_state.next == 'video':
-        return 'youtube_node'
-    elif current_state.next == 'write':
-        return 'writer_node'
-    elif current_state.next == 'proof':
-        return 'proofing_node'
-    elif current_state.next == '__end__':
-        return '__end__'
-    elif current_state.next == 'title':
-        return 'title_node'
+    if current_state.next == "web":
+        return "web_node"
+    elif current_state.next == "video":
+        return "youtube_node"
+    elif current_state.next == "write":
+        return "writer_node"
+    elif current_state.next == "proof":
+        return "proofing_node"
+    elif current_state.next == "__end__":
+        return "__end__"
+    elif current_state.next == "title":
+        return "title_node"
     else:
-        return '__end__'
+        return "__end__"
 
 
 # Defining graph
 builder = StateGraph(State)
 builder.add_edge(START, "preparation_node")
 builder.add_node("preparation_node", preparation_node)
-builder.add_conditional_edges('preparation_node', router)
-builder.add_node('web_node', web_node)
-builder.add_conditional_edges('web_node', router)
-builder.add_node('youtube_node', youtube_node)
-builder.add_conditional_edges('youtube_node', router)
-builder.add_node('writer_node', writer_node)
-builder.add_conditional_edges('writer_node', router)
-builder.add_node('proofing_node', proofing_node)
-builder.add_conditional_edges('proofing_node', router)
-builder.add_node('title_node', proofing_node)
-builder.add_edge('title_node', END)
+builder.add_conditional_edges("preparation_node", router)
+builder.add_node("web_node", web_node)
+builder.add_conditional_edges("web_node", router)
+builder.add_node("youtube_node", youtube_node)
+builder.add_conditional_edges("youtube_node", router)
+builder.add_node("writer_node", writer_node)
+builder.add_conditional_edges("writer_node", router)
+builder.add_node("proofing_node", proofing_node)
+builder.add_conditional_edges("proofing_node", router)
+builder.add_node("title_node", title_node)
+builder.add_edge("title_node", END)
 graph = builder.compile()
 
 
 # Function call for running agent
 @task
 async def invoke_agent(user: dict):
-    try: 
-        topic_length = len(user['interests'])
+    try:
+        topic_length = len(user["interests"])
         desired_subjects: List[str] = []
         if topic_length >= 3:
-            desired_subjects = random.sample(user['interests'], 3)
+            desired_subjects = random.sample(user["interests"], 3)
         else:
-            desired_subjects = user['interests']
+            desired_subjects = user["interests"]
         initial_state = State()
-        populated_state = initial_state.model_copy(update={"desired_subjects": desired_subjects, "user": user['id']})
+        populated_state = initial_state.model_copy(update={"desired_subjects": desired_subjects, "user": user["id"]})
         populated_state.messages.append(HumanMessage(content=f"desired_subjects: {desired_subjects}"))
         result = await graph.ainvoke(populated_state)
         return result
     except Exception as e:
-        print('ERROR', e)
+        print("ERROR", e)
         return None
 
 
@@ -81,7 +84,7 @@ async def invoke_agent(user: dict):
 @flow(log_prints=True)
 async def process_users():
     db = await connectToFirestore()
-    users = db.collection('Users')
+    users = db.collection("Users")
     last_doc = None
     while True:
         query = users.order_by("signUpDate").limit(100)
@@ -105,13 +108,14 @@ async def process_users():
 
         results = await asyncio.gather(*tasks)
         for result in results:
-            db.collection('Newsletters').add({
-                "userId": result['user'],
-                "webLinks": result['web_links'],
-                "youtubeLinks": result['youtube_links'],
-                "webFinalSummaries": result['web_final_summaries'],
-                "youtubeFinalSummaries": result['youtube_final_summaries'],
-                "webFinalTitles": result['web_final_titles'],
-                "youtubeFinalTitles": result['youtube_final_summaries']
-            })
-
+            db.collection("Newsletters").add(
+                {
+                    "userId": result["user"],
+                    "webLinks": result["web_links"],
+                    "youtubeLinks": result["youtube_links"],
+                    "webFinalSummaries": result["web_final_summaries"],
+                    "youtubeFinalSummaries": result["youtube_final_summaries"],
+                    "webFinalTitles": result["web_final_titles"],
+                    "youtubeFinalTitles": result["youtube_final_titles"],
+                }
+            )
