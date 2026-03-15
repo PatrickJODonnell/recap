@@ -1,0 +1,6 @@
+# Prefect deployment configuration for CI/CD
+deployments:
+  - name: recap
+    entrypoint: agent.py:process_users
+    work_pool:
+      name: Recap
