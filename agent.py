@@ -13,7 +13,7 @@ from preparation_agent import preparation_node
 from proofing_agent import proofing_node
 from state import State
 from title_agent import title_node
-from utils import connectToFirestore
+from utils import connectToFirestore, inject_secrets
 from web_agent import web_node
 from writer_agent import writer_node
 from youtube_agent import youtube_node
@@ -84,6 +84,7 @@ async def invoke_agent(user: dict):
 @flow(log_prints=True)
 async def process_users():
     db = await connectToFirestore()
+    await inject_secrets()
     users = db.collection("Users")
     last_doc = None
     while True:

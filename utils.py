@@ -1,23 +1,25 @@
 import asyncio
-import httpx
-import openai
-import numpy as np
-from langchain.document_loaders import WebBaseLoader
+import os
+
 import firebase_admin
+import httpx
+import numpy as np
+import openai
 from firebase_admin import credentials, firestore
+from langchain.document_loaders import WebBaseLoader
 from prefect.blocks.system import Secret
+
 
 def get_openai_embedding(text: str):
     """Generates an embedding using OpenAI's `text-embedding-ada-002` model."""
-    response = openai.embeddings.create(
-        input=text,
-        model="text-embedding-ada-002"
-    )
+    response = openai.embeddings.create(input=text, model="text-embedding-ada-002")
     return np.array(response.data[0].embedding)
+
 
 def cosine_similarity(vec1, vec2):
     """Computes cosine similarity between two vectors."""
     return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+
 
 def scrape_with_webbase(url: str) -> str:
     """
@@ -29,7 +31,8 @@ def scrape_with_webbase(url: str) -> str:
         return docs[0].page_content if docs else "No readable content found."
     except Exception:
         return None
-    
+
+
 def retry(max_retries=3, retry_delay=5):
     def decorator(func):
         def wrapper(*args, **kwargs):
@@ -52,11 +55,20 @@ def retry(max_retries=3, retry_delay=5):
 
     return decorator
 
+
 async def connectToFirestore():
-    """ Util function used to connect to firestore """
+    """Util function used to connect to firestore"""
     firebase_secret_block = await Secret.load("firebase-config")
     firebase_secret = firebase_secret_block.get()
     firebase_creds = credentials.Certificate(firebase_secret)
     firebase_admin.initialize_app(firebase_creds)
     db = firestore.client()
     return db
+
+
+async def inject_secrets():
+    """Injecting secrets into the environment from the secret block"""
+    flow_secrets_json = await Secret.load("recap-secrets")
+    flow_secrets = flow_secrets_json.get()
+    for key, value in flow_secrets.items():
+        os.environ[key] = value
