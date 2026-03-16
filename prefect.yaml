@@ -7,3 +7,10 @@ deployments:
     schedule:
       cron: "50 5 * * 0"
       timezone: "America/New_York"
+    pull:
+      - prefect.deployments.steps.git_clone:
+          id: clone
+          repository: https://github.com/patrickodonnell/recap.git
+          branch: main
+      - prefect.deployments.steps.set_working_directory:
+          directory: "{{ clone.directory }}"
