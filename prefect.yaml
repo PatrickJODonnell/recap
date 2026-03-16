@@ -10,7 +10,7 @@ deployments:
     pull:
       - prefect.deployments.steps.git_clone:
           id: clone
-          repository: https://github.com/patrickodonnell/recap.git
+          repository: https://github.com/PatrickJODonnell/recap.git
           branch: main
           access_token: "{{ prefect.blocks.secret.github-recap-token.value }}"
       - prefect.deployments.steps.set_working_directory:
